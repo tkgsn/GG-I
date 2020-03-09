@@ -3,6 +3,7 @@ import src.data_loader as DataLoader
 import src.graph_maker as gm
 import joblib
 import time
+import os
 
 def make_graph(n_nodes):
 
@@ -28,6 +29,7 @@ if __name__ == '__main__':
     epsilon = 0.01
     n_nodes = [5, 10, 15, 25, 50]
 
+    os.makedirs(f"results/optimize_synthetic/", exist_ok="True")
     for n_node in n_nodes:
         lgm = make_graph(n_node)
         data_loader = DataLoader.DataLoader(lgm.name, prior="unbalance", graph_maker=lgm)
@@ -43,5 +45,4 @@ if __name__ == '__main__':
         elapsed_time = time.time() - start
 
         optimal_score = score(mec)
-        joblib.dump(filename=f"results/optimize_score_n_nodes_{n_node**2}.jbl", value=[elapsed_time, pre_score, optimal_score])
-        #joblib.dump(filename=f"results/optimize_synthetic_/optimize_score_n_nodes_{n_node**2}_.jbl", value=[elapsed_time])
+        joblib.dump(filename=f"results/optimize_synthetic/optimize_score_n_nodes_{n_node**2}.jbl", value=[elapsed_time, pre_score, optimal_score])
