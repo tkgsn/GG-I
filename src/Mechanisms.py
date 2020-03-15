@@ -88,9 +88,9 @@ class PlanarLaplaceMechanismOnGraph(Mechanism):
         self.dist = np.zeros((len(self.data_loader.G),len(self.data_loader.G)))
         dist = plg_maker.MakePLG(self.data_loader.G, self.data_loader.H, epsilon, "ox").dist
         for node, dist_ in dist.items():
-            node_ind = self.g_index(node)
+            node_ind = self.data_loader.g_index[node]
             for node_, prob in dist_.items():
-                node_ind_ = self.g_index(node_)
+                node_ind_ = self.data_loader.g_index[node_]
                 self.dist[node_ind][node_ind_] = prob
 
 class GraphExponentialMechanism(Mechanism):
