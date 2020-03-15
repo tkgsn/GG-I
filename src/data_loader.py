@@ -24,8 +24,8 @@ class DataLoader():
             self.np_sub_pr = graph_maker.np_sub_pr
     
     def load(self, location_name):
-        graph_dir = "/data/takagi/GG-I/data/graph"
-        data_dir = "/data/takagi/GG-I/data/graph_data"
+        graph_dir = os.path.join("data", "graph")
+        data_dir = os.path.join("data", "graph_data")
         
         #G = ox.load_graphml(f'{location_name}.ml',folder=graph_dir)
         #H = ox.load_graphml(f'sub_{location_name}.ml',folder=graph_dir)

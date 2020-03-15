@@ -25,11 +25,13 @@ class GraphMaker():
                 self.dict_sd[str(node)][str(node_)] = dict_sd[node][node_] if node_ in list(dict_sd[node].keys()) else 0
     
     def save(self):
-        graph_path = os.path.join("/", "data", "takagi", "GG-I", "data", "graph")
+        graph_path = os.path.join("data", "graph")
+        os.makedirs(graph_path, exist_ok=True)
         nx.write_graphml(self.G, os.path.join(graph_path, self.name + ".ml"))
         nx.write_graphml(self.G, os.path.join(graph_path, "sub_" + self.name + ".ml"))
         
-        data_path = os.path.join("/", "data", "takagi", "GG-I", "data", "graph_data")
+        data_path = os.path.join("data", "graph_data")
+        os.makedirs(data_path, exist_ok=True)
         joblib.dump(filename=os.path.join(data_path, "dict_sd_" + self.name + ".jbl"), value=self.dict_sd)
         
 
