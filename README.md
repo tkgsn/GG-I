@@ -1,4 +1,5 @@
 # GG-I
+This implementation is written by Python 3.7.
 
 
 ## How to run
