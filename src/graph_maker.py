@@ -10,6 +10,9 @@ import numpy as np
 import src.my_util as util
 
 
+graph_path = os.path.join("data", "graph")
+data_path = os.path.join("data", "graph_data")
+
 class GraphMaker():
     def __init__(self):
         pass
@@ -25,24 +28,20 @@ class GraphMaker():
                 self.dict_sd[str(node)][str(node_)] = dict_sd[node][node_] if node_ in list(dict_sd[node].keys()) else 0
     
     def save(self):
-        graph_path = os.path.join("data", "graph")
         os.makedirs(graph_path, exist_ok=True)
         nx.write_graphml(self.G, os.path.join(graph_path, self.name + ".ml"))
         nx.write_graphml(self.G, os.path.join(graph_path, "sub_" + self.name + ".ml"))
         
-        data_path = os.path.join("data", "graph_data")
         os.makedirs(data_path, exist_ok=True)
         joblib.dump(filename=os.path.join(data_path, "dict_sd_" + self.name + ".jbl"), value=self.dict_sd)
         
 
 class MapGraphMaker(GraphMaker):
-    def __init__(self, lat, lon, distance):
-        self.lat = lat
-        self.lon = lon
-        self.distance = distance
+    def __init__(self):
+        pass
     
-    def make_graph(self, name):
-        self.G = ox.graph_from_point((self.lat, self.lon),distance_type="network", distance=self.distance, network_type="walk")
+    def make_graph(self, lat, lon, distance, name):
+        self.G = ox.graph_from_point((lat, lon),distance_type="network", distance=distance, network_type="walk", simplify=True)
         self.name = name
         self.cp_dict_sd()
         
@@ -50,11 +49,9 @@ class MapGraphMaker(GraphMaker):
         ox.plot_graph(self.G, save=True, file_format="png")
         
     def save(self):
-        graph_path = os.path.join("/", "data", "takagi", "GG-I", "data", "graph")
-        ox.save_graphml(self.G, os.path.join(graph_path, self.name + ".ml"))
-        ox.save_graphml(self.G, os.path.join(graph_path, "sub_" + self.name + ".ml"))
+        ox.save_graphml(self.G, os.path.join("..", graph_path, self.name + ".ml"))
+        ox.save_graphml(self.G, os.path.join("..", graph_path, "sub_" + self.name + ".ml"))
         
-        data_path = os.path.join("/", "data", "takagi", "GG-I", "data", "graph_data")
         joblib.dump(filename=os.path.join(data_path, "dict_sd_" + self.name + ".jbl"), value=self.dict_sd)
         
 k = 0.001
@@ -75,11 +72,10 @@ class KyotoMapGraphMaker(GraphMaker):
         return KyotoGraphMaker.g.inv(KyotoGraphMaker.MIN_LON, KyotoGraphMaker.MIN_LAT, KyotoGraphMaker.MAX_LON, KyotoGraphMaker.MIN_LAT)[2]
     
     def save(self):
-        graph_path = os.path.join("/", "data", "takagi", "GG-I", "data", "graph")
+
         ox.save_graphml(self.G, os.path.join(graph_path, self.name + ".ml"))
         ox.save_graphml(self.G, os.path.join(graph_path, "sub_" + self.name + ".ml"))
         
-        data_path = os.path.join("/", "data", "takagi", "GG-I", "data", "graph_data")
         joblib.dump(filename=os.path.join(data_path, "dict_sd_" + self.name + ".jbl"), value=self.dict_sd)
 
     def compute_shortest_distances(self):
