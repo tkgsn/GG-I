@@ -12,8 +12,6 @@ import src.my_util as util
 
 graph_path = os.path.join("data", "graph")
 data_path = os.path.join("data", "graph_data")
-os.makedirs(graph_path, exist_ok=True)
-os.makedirs(data_path, exist_ok=True)
 
 class GraphMaker():
     def __init__(self):
@@ -44,6 +42,7 @@ class MapGraphMaker(GraphMaker):
     
     def make_graph(self, lat, lon, distance, name):
         self.G = ox.graph_from_point((lat, lon),distance_type="network", distance=distance, network_type="walk", simplify=True)
+        self.H = ox.graph_from_point((lat, lon),distance_type="network", distance=distance/2, network_type="walk", simplify=True)
         self.name = name
         self.cp_dict_sd()
         
@@ -52,7 +51,7 @@ class MapGraphMaker(GraphMaker):
         
     def save(self):
         ox.save_graphml(self.G, os.path.join("..", graph_path, self.name + ".ml"))
-        ox.save_graphml(self.G, os.path.join("..", graph_path, "sub_" + self.name + ".ml"))
+        ox.save_graphml(self.H, os.path.join("..", graph_path, "sub_" + self.name + ".ml"))
         
         joblib.dump(filename=os.path.join(data_path, "dict_sd_" + self.name + ".jbl"), value=self.dict_sd)
         
