@@ -4,6 +4,9 @@ This implementation is written by Python 3.7.
 
 ## How to run
 ```
+git clone https://github.com/tkgsn/GG-I.git
+cd GG-I
+
 python -m venv venv
 . venv/bin/activate
 pip install -r requirements.txt
