@@ -12,6 +12,8 @@ import src.my_util as util
 
 graph_path = os.path.join("data", "graph")
 data_path = os.path.join("data", "graph_data")
+os.makedirs(graph_path, exist_ok=True)
+os.makedirs(data_path, exist_ok=True)
 
 class GraphMaker():
     def __init__(self):
