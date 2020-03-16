@@ -1,5 +1,5 @@
 # GG-I
-This implementation is written by Python 3.7.
+This implementation is written by Python 3.7 with libspatialindex.
 
 
 ## How to run
