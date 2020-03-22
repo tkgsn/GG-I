@@ -20,3 +20,8 @@ run_time.ipynb
 
 exp_in_real-world_map.ipynb
 - You can see the results in real-world maps comparing GEM and PLMG.
+
+
+## Reference
+
+Takagi, S., Cao, Y., Asano, Y., & Yoshikawa, M. (2019, July). Geo-graph-indistinguishability: Protecting location privacy for LBS over road networks. In IFIP Annual Conference on Data and Applications Security and Privacy (pp. 143-163). Springer, Cham.
