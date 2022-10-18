@@ -1,5 +1,6 @@
 from pyproj import Geod
-import joblib
+# import joblib
+import pickle
 import copy
 import os
 import networkx as nx
@@ -8,12 +9,19 @@ import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import numpy as np
 import src.my_util as util
+import os
+import pathlib
+import json
+import functools
+from src.my_util import LatlonRange, graph_dir
+from logging import getLogger, config
+import random
 
+with open('/GG-I/data/log_config.json', 'r') as f:
+    log_conf = json.load(f)
+config.dictConfig(log_conf)
+logger = getLogger("sub_module")
 
-graph_path = os.path.join("data", "graph")
-data_path = os.path.join("data", "graph_data")
-os.makedirs(graph_path, exist_ok=True)
-os.makedirs(data_path, exist_ok=True)
 
 class GraphMaker():
     def __init__(self):
@@ -22,43 +30,56 @@ class GraphMaker():
     def make_graph(self):
         pass
     
-    def cp_dict_sd(self):
-        dict_sd = dict(nx.all_pairs_dijkstra_path_length(self.G, weight='length'))
-        self.dict_sd = {str(node):{} for node in self.G.nodes}
-        for node in self.G.nodes:
-            for node_ in self.G.nodes:
-                self.dict_sd[str(node)][str(node_)] = dict_sd[node][node_] if node_ in list(dict_sd[node].keys()) else 0
-    
-    def save(self):
-        os.makedirs(graph_path, exist_ok=True)
-        nx.write_graphml(self.G, os.path.join(graph_path, self.name + ".ml"))
-        nx.write_graphml(self.G, os.path.join(graph_path, "sub_" + self.name + ".ml"))
-        
-        os.makedirs(data_path, exist_ok=True)
-        joblib.dump(filename=os.path.join(data_path, "dict_sd_" + self.name + ".jbl"), value=self.dict_sd)
-        
+    def compute_shortest_path_distance_dict(self, graph):
+        shortest_path_distance_dict = dict(nx.all_pairs_dijkstra_path_length(graph, weight='length'))
+        self.shortest_path_distance_dict = {node:{} for node in graph.nodes}
+        for node in graph.nodes:
+            for node_ in graph.nodes:
+                shortest_path_distance_dict[node][node_] = shortest_path_distance_dict[node][node_] if node_ in list(shortest_path_distance_dict[node].keys()) else 0
+        return shortest_path_distance_dict
+
+    def make_uniform_prior_distribution(self, graph, sub_graph):
+        n_sub_graph_nodes = len(sub_graph)
+        prior = {node:0 for node in graph.nodes()}
+        for node in sub_graph.nodes():
+            prior[node] = 1/n_sub_graph_nodes
+        return prior
 
 class MapGraphMaker(GraphMaker):
     def __init__(self):
         pass
     
-    def make_graph(self, lat, lon, distance, name):
-        self.G = ox.graph_from_point((lat, lon),distance_type="network", distance=distance, network_type="walk", simplify=True)
-        self.H = ox.graph_from_point((lat, lon),distance_type="network", distance=distance/2, network_type="walk", simplify=True)
-        self.name = name
-        self.cp_dict_sd()
+    def compute_euclidean_distance_dict(self, graph):
+        euclidean_distance_dict = {node:{node_in:util.haversine(float(graph.nodes[node]["x"]), float(graph.nodes[node]["y"]), float(graph.nodes[node_in]["x"]), float(graph.nodes[node_in]["y"])) for node_in in graph.nodes()} for node in graph.nodes()}
+        return euclidean_distance_dict
+    
+    def make_graph(self, lat, lon, distance, simplify=False):
+        name = f"{lat}_{lon}_{distance}_symplify{simplify}.ml"
+        sub_name = f"sub_{lat}_{lon}_{distance}_symplify{simplify}.ml"
+        graph_data_dir = graph_dir / name
+        sub_graph_data_dir = graph_dir / sub_name
         
-    def plot_graph(self):
-        ox.plot_graph(self.G, save=True, file_format="png")
-        
-    def save(self):
-        ox.save_graphml(self.G, os.path.join("..", graph_path, self.name + ".ml"))
-        ox.save_graphml(self.H, os.path.join("..", graph_path, "sub_" + self.name + ".ml"))
-        
-        joblib.dump(filename=os.path.join(data_path, "dict_sd_" + self.name + ".jbl"), value=self.dict_sd)
-        
+        logger.info(f"downloading from OpenStreetMap with keyword ({lat},{lon}), distance={distance}, simplyfy={simplify} takes some time")
+        graph = ox.graph_from_point((lat, lon),dist_type="network", dist=distance, network_type="walk", simplify=simplify)
+        sub_graph = ox.graph_from_point((lat, lon),dist_type="network", dist=distance/2, network_type="walk", simplify=simplify)
+        logger.info(f"n nodes\t main: {len(graph)}, sub {len(sub_graph)}")
+            
+        ox.plot_graph(graph, save=True, filepath=f"imgs/{name}.png")
+        return graph, sub_graph
+    
+    def compute_range(self, graph):
+        lats = [i[1]["y"] for i in graph.nodes(data=True)]
+        lons = [i[1]["x"] for i in graph.nodes(data=True)]
+
+        min_lat = min(lats)
+        max_lat = max(lats)
+        min_lon = min(lons)
+        max_lon = max(lons)
+        return min_lat, max_lat, min_lon, max_lon
+
+
 k = 0.001
-class KyotoMapGraphMaker(GraphMaker):
+class KyotoMapGraphMaker(MapGraphMaker):
     
     MIN_LAT = 34.8955054
     MAX_LAT = 35.301761
@@ -73,16 +94,6 @@ class KyotoMapGraphMaker(GraphMaker):
     @classmethod
     def max_width(self):
         return KyotoGraphMaker.g.inv(KyotoGraphMaker.MIN_LON, KyotoGraphMaker.MIN_LAT, KyotoGraphMaker.MAX_LON, KyotoGraphMaker.MIN_LAT)[2]
-    
-    def save(self):
-
-        ox.save_graphml(self.G, os.path.join(graph_path, self.name + ".ml"))
-        ox.save_graphml(self.G, os.path.join(graph_path, "sub_" + self.name + ".ml"))
-        
-        joblib.dump(filename=os.path.join(data_path, "dict_sd_" + self.name + ".jbl"), value=self.dict_sd)
-
-    def compute_shortest_distances(self):
-        self.shortest_dists = dict(nx.all_pairs_dijkstra_path_length(self.G,weight='length'))    
 
     def graph_width(self):
         return KyotoGraphMaker.g.inv(self.min_lon, self.min_lat, self.max_lon, self.min_lat)[2]
@@ -92,164 +103,75 @@ class KyotoMapGraphMaker(GraphMaker):
 
     def __init__(self):
         self.name = "Kyoto"
-        self.G = None
-        self.made_graph = None
-        self.shibus_data = None
-        self.latlons = {}
-        self.load_shibus_data()
-        self.load_graph()
+        self.kyoto_graph = self._load_kyoto_graph()
         
-    def load_graph(self):
-        self.G = joblib.load(os.path.join(os.getcwd(),"data/graph/kyoto.jbl"))
-        
-    def make_graph(self, min_lat = 34.8955054, max_lat = 35.301761, min_lon = 135.5617132, max_lon = 135.8579904):
-        self.made_graph  = copy.deepcopy(self.G)
-        for node in self.G.nodes(data=True):
+    def _load_kyoto_graph(self):
+        kyoto_graph_path = graph_dir / "kyotoshi.ml"
+        if kyoto_graph_path.exists():
+            logger.info(f"loading cached file from {kyoto_graph_path}")
+            kyoto_graph = ox.load_graphml(kyoto_graph_path)
+            kyoto_graph = nx.relabel_nodes(kyoto_graph, str)
+        else:
+            logger.info("downloading from OpenStreetMap with keyword \"kyoto\" takes some time")
+            kyoto_graph = ox.graph_from_place("Kyoto", simplify=True)
+            kyoto_graph = nx.relabel_nodes(kyoto_graph, str)
+            ox.save_graphml(kyoto_graph, kyoto_graph_path)
+        return kyoto_graph
+
+    def make_graph(self, latlon_range):
+
+        truncated_graph = copy.deepcopy(self.kyoto_graph)
+        for node in self.kyoto_graph.nodes(data=True):
             lat = node[1]["y"]
             lon = node[1]["x"]
-            if (min_lat > lat) or (max_lat < lat) or (min_lon > lon) or (max_lon < lon):
-                self.made_graph.remove_node(node[0])
-        self.made_graph = self.made_graph.to_undirected()
-       
-        max_component = self.max_component()
-        for node in copy.deepcopy(self.made_graph):
-            if not node in max_component:
-                self.made_graph.remove_node(node)            
-        
-        self.min_lat = min_lat
-        self.max_lat = max_lat
-        self.min_lon = min_lon
-        self.max_lon = max_lon
-        
-        self.G = self.made_graph
-        
-        self.compute_shortest_distances()
-        self.make_latlons()
-        self.make_bus_stop_node_dict()
-        #self.make_nearest_bus_stop_list_s()
-        self.make_prior_distribution_exponential()
-        self._cp_np_pr()
-        
-       
-    def max_component(self):
-        max_size = 0
-        for component in nx.connected_components(self.made_graph):
-            if len(component) > max_size:
-                max_cluster = component
-                max_size = len(max_cluster)
-        return max_cluster
-        
-    def load_shibus_data(self):
-        self.shibus_data = joblib.load(os.path.join(os.getcwd(),"data/shibus_data.jbl"))
-        
-    def make_latlons(self):
-        for name, data in self.shibus_data.items():
-            lat = float(data["lat"])
-            lon = float(data["lon"])
-            get_off = int(data["get_off"])
-            ride_on = int(data["ride_on"])
-            if not  ((self.min_lat > lat) or (self.max_lat < lat) or (self.min_lon > lon) or (self.max_lon < lon)):
-                self.latlons[name] = {}
-                self.latlons[name]["lon"] = lon
-                self.latlons[name]["lat"] = lat
-                self.latlons[name]["get_off"] = get_off
-                self.latlons[name]["ride_on"] = ride_on
-                self.latlons[name]["sum"] = get_off + ride_on
-                
-    def make_bus_stop_node_dict(self):
-        self.bus_stop_node_dict = {}
-        for name, data in self.latlons.items():
-            node = ox.get_nearest_node(G=self.made_graph, point=(data["lat"],data["lon"]))
-            self.bus_stop_node_dict[name] = node
-            
-    def make_nearest_bus_stop_list_s(self):
-        self.bus_stop_counter_s = {}
-        self.sum_bus_user_s = 0
-        self.distance_to_bus_stop = {}
-        for key,node in self.bus_stop_node_dict.items():
-            self.bus_stop_counter_s[key] = 0
-            self.sum_bus_user_s += self.latlons[key]["sum"]
-        self.nearest_bus_stop_s = {}
-        for key, node in self.made_graph.nodes(data=True):
-            nearest_bus_stop = self.find_nearest_bus_stop(key)
-            self.nearest_bus_stop_s[key] = nearest_bus_stop
-            distance = self.shortest_dists[key][self.bus_stop_node_dict[nearest_bus_stop]]
-            self.distance_to_bus_stop[key] = distance
-            self.bus_stop_counter_s[nearest_bus_stop] += np.exp(-0.001 * np.power(distance,2))
-                
-    def find_nearest_bus_stop(self, node):
-        shortest_distances = {a: self.shortest_dists[node][a] for a in self.bus_stop_node_dict.values()}
-        return list(self.bus_stop_node_dict.keys())[np.argmin(list(shortest_distances.values()))]
+            if (latlon_range.min_lat > lat) or (latlon_range.max_lat < lat) or (latlon_range.min_lon > lon) or (latlon_range.max_lon < lon):
+                truncated_graph.remove_node(node[0])
+        truncated_graph = truncated_graph.to_undirected()      
     
-    def make_nearest_bus_stop_list(self):
-        H = nx.Graph()
-        self.bus_stop_counter = {}
-        self.sum_bus_user = 0
-        for key,node in self.latlons.items():
-            H.add_node(key)
-            H.node[key]["y"] = node["lat"]
-            H.node[key]["x"] = node["lon"]
-            self.bus_stop_counter[key] = 0
-            self.sum_bus_user += node["sum"]
-        self.nearest_bus_stop = {}
-        for key, node in self.made_graph.nodes(data=True):
-            nearest_bus_stop = ox.get_nearest_node(G=H,point=(node["y"],node["x"]))
-            self.nearest_bus_stop[key] = nearest_bus_stop
-            self.bus_stop_counter[nearest_bus_stop] += 1
+        return truncated_graph, truncated_graph
+        
+    def _load_shibus_data(self, graph):
+        min_lat, max_lat, min_lon, max_lon = self.compute_range(graph)
+        with open("/GG-I/data/shibus_data.json", "r") as f:
+            shibus_data = json.load(f)
+            
+        shibus_data = {name:v for name, v in shibus_data.items() if not ((min_lat > v["lat"]) or (max_lat < v["lat"]) or (min_lon > v["lon"]) or (max_lon < v["lon"]))}
+        
+        for name, v in shibus_data.items():
+            v["node"] = ox.nearest_nodes(graph, v["lon"], v["lat"])
+        
+        return shibus_data
     
-    def make_prior_distribution_exponential(self):
-        self.prior_distribution_s = {node:0 for node in self.made_graph.nodes}
-        suma = 0
-        for name, bus_stop_node in self.bus_stop_node_dict.items():
-            for node, value in self.shortest_dists[bus_stop_node].items():
-                score = np.exp(-k * value) * self.latlons[name]["sum"]
-                self.prior_distribution_s[node] += score
-                suma += score
-        self.prior_distribution_s = {node:value/suma for node, value in self.prior_distribution_s.items()}
-            
-            
-    def make_prior_distribution(self):
-        self.prior_distribution = {}
-        for node, bus_stop in self.nearest_bus_stop.items():
-            distance = self.distance_to_bus_stop[node]
-            self.prior_distribution[node] = np.exp(-0.001 * distance)*self.latlons[bus_stop]["sum"]/(self.sum_bus_user*self.bus_stop_counter[bus_stop])
+    def make_prior_distribution(self, graph, shortest_path_distance_dict):
+        shibus_data = self._load_shibus_data(graph)
+        
+        prior_distribution = {node:0 for node in graph.nodes}
+        sum_ = 0
+        for name, v in shibus_data.items():
+            for node, value in shortest_path_distance_dict[v["node"]].items():
+                score = np.exp(-k * value) * v["sum"]
+                prior_distribution[node] += score
+                sum_ += score
+        prior_distribution = {node:value/sum_ for node, value in prior_distribution.items()}
+        
+        return prior_distribution
+    
 
-    def make_prior_distribution_s(self):
-        self.prior_distribution_s = {}
-        for node, bus_stop in self.nearest_bus_stop_s.items():
-            distance = self.distance_to_bus_stop[node]
-            #self.prior_distribution_s[node] = self.latlons[bus_stop]["sum"]/(self.sum_bus_user_s*self.bus_stop_counter_s[bus_stop])
-            self.prior_distribution_s[node] = np.exp(-0.001 * distance)*self.latlons[bus_stop]["sum"]/(self.sum_bus_user_s*self.bus_stop_counter_s[bus_stop])
+    def plot_bus_stop(self, graph):
+        shibus_data = self._load_shibus_data(graph)
+        x_cord = [v["lon"] for name, v in shibus_data.items()]
+        y_cord = [v["lat"] for name, v in shibus_data.items()]
+        data = [v["sum"] for name, v in shibus_data.items()]
+        name = list(shibus_data.keys())
             
-    def plot_bus_stop(self):
-        x_cord = []
-        y_cord = []
-        data = []
-        name = []
-        for bus_stop, value in self.latlons.items():
-            x_cord.append(value["lon"])
-            y_cord.append(value["lat"])
-            data.append(value["sum"])
-            name.append(bus_stop)
-        fig, ax = ox.plot_graph(self.made_graph,show=False,close=False,node_color="black",node_size=0)
-        im = ax.scatter(x_cord,y_cord,  c=data, s=30, cmap=cm.Spectral)
-        #for i,(x,y) in enumerate(zip(x_cord,y_cord)):
-        #    ax.annotate(name[i],(x,y))
+        fig, ax = ox.plot_graph(graph,show=False,close=False,node_color="black",node_size=0)
+        im = ax.scatter(x_cord,y_cord, c=data, s=30, cmap=cm.Spectral)
         plt.axis("equal")
         fig.colorbar(im)
-        #ax.set_title(f"prior")
         plt.savefig("prior.eps")
         plt.show() 
         
-    def _cp_np_pr(self):
-        self.np_pr = np.zeros((len(self.G.nodes), 1))
-        self.np_sub_pr = np.zeros((len(self.G.nodes), 1))
-        
-        for i, node in enumerate(self.G.nodes):
-            self.np_pr[i, 0] = self.prior_distribution_s[node]
-            self.np_sub_pr[i, 0] = self.prior_distribution_s[node]
-        
-        
+
 class LatticeGraphMaker(GraphMaker):
     def __init__(self, side_length=100, side_lattice_number=10):
         self.side_lattice_number = side_lattice_number
@@ -262,11 +184,11 @@ class LatticeGraphMaker(GraphMaker):
         
         self.name = f"lattice_side_{self.side_length}_nlattice_{self.side_lattice_number}"
         
-        self.G = nx.grid_graph(dim=[self.side_lattice_number, self.side_lattice_number])
-        for u, d in self.G.nodes(data=True):
+        self.graph = nx.grid_graph(dim=[self.side_lattice_number, self.side_lattice_number])
+        for u, d in self.graph.nodes(data=True):
             d["x"] = u[0]
             d["y"] = u[1]
-        for u, v, d in self.G.edges(data=True):
+        for u, v, d in self.graph.edges(data=True):
             d["length"] = self.side_length/(self.side_lattice_number-1)
 
         self.cp_dict_sd()
@@ -301,3 +223,54 @@ class LatticeGraphMaker(GraphMaker):
         high_point = int(ratio * self.side_lattice_number)
         
         self.high_point1, self.high_point2, self.high_point3, self.high_point4 = (high_point-1, high_point-1), (high_point-1, self.side_lattice_number -high_point), (self.side_lattice_number - high_point, high_point-1), (self.side_lattice_number - high_point, self.side_lattice_number - high_point)
+        
+        
+
+
+def apply_spanner(data_loader, delta, n_nodes):
+
+    spanner = nx.Graph()
+    
+    if n_nodes == 0:
+        n_nodes = len(data_loader.G)
+        
+    logger.info(f"chosen node is fixed by seed {0}")
+    random.seed(0)
+    nodes = random.sample(data_loader.G.nodes(data=True), n_nodes)
+    spanner.add_nodes_from(nodes)
+    spanner.graph["crs"] = data_loader.G.graph["crs"]
+    
+    node_indice = [data_loader.g_index[node] for node in spanner.nodes]
+    truncated_np_ed = data_loader.np_ed[node_indice,:][:,node_indice]
+    truncated_index_g = [data_loader.index_g[node_index] for node_index in np.sort(np.array(node_indice))]
+    truncated_g_index = {node: truncated_index_g.index(node) for node in spanner.nodes}
+
+    sorted_indice = np.vstack(np.unravel_index(np.argsort(-truncated_np_ed, axis=None), truncated_np_ed.shape)).T
+    
+    logger.info(f"the number of candidate edges: {len(sorted_indice)}")
+    for index in sorted_indice:
+        node_from = truncated_index_g[index[0]]
+        node_to = truncated_index_g[index[1]]
+
+        if nx.has_path(spanner, node_from, node_to):
+            shortest_path_distance = nx.dijkstra_path_length(spanner, node_from, node_to, weight="weight")
+        else:
+            shortest_path_distance = float("inf")
+            
+        if shortest_path_distance >= delta * data_loader.np_ed[index[0]][index[1]]:
+            spanner.add_edge(node_from, node_to, weight=data_loader.np_ed[index[0]][index[1]])   
+            
+            
+    node_mapping = {node:"" for node in data_loader.G.nodes()}
+    truncated_np_pr = data_loader.np_pr[node_indice,:]
+    for node in data_loader.G.nodes(data=True):
+        if not node[0] in spanner.nodes():
+            nearest_node = ox.nearest_nodes(spanner, node[1]["x"], node[1]["y"])
+            node_mapping[node[0]] = nearest_node
+            index_in_spanner = truncated_g_index[nearest_node]
+            index_in_g = data_loader.g_index[node[0]]
+            truncated_np_pr[index_in_spanner,0] += data_loader.np_pr[index_in_g]
+        else:
+            node_mapping[node[0]] = node[0]
+
+    return spanner, truncated_np_ed, truncated_np_pr, truncated_index_g, truncated_g_index, node_mapping

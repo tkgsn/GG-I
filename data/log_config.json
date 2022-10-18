@@ -18,7 +18,13 @@
             "class": "logging.FileHandler",
             "level": "INFO",
             "formatter": "simple",
-            "filename": "to be replaced"
+            "filename": "out.txt"
+        },
+        "debugHandler": {
+            "class": "logging.FileHandler",
+            "level": "DEBUG",
+            "formatter": "simple",
+            "filename": "debug.txt"
         }
     },
 
@@ -33,7 +39,12 @@
             "handlers": ["consoleHandler", "fileHandler"],
             "propagate": false
         },
-        "lower.sub": {
+        "debug_module": {
+            "level": "DEBUG",
+            "handlers": ["debugHandler"],
+            "propagate": false
+        },
+        "sub_module": {
             "level": "DEBUG",
             "handlers": ["consoleHandler", "fileHandler"],
             "propagate": false

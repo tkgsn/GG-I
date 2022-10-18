@@ -1,58 +1,159 @@
 import osmnx as ox
-import joblib
+# import joblib
 import numpy as np
 import os
 import networkx as nx
+from src.my_util import LatlonRange, graph_dir, spd_dir, prior_dir, ed_dir
+# import src.graph_maker as graph_maker
+from src.graph_maker import MapGraphMaker, KyotoMapGraphMaker
+import json
+
+from logging import getLogger, config
+with open('/GG-I/data/log_config.json', 'r') as f:
+    log_conf = json.load(f)
+config.dictConfig(log_conf)
+logger = getLogger("sub_module")
+
+BUS = "bus"
+UNIFORM = "uniform"
+
+with open('/GG-I/data/location_data.json', 'r') as f:
+    location_data = json.load(f)
 
 class DataLoader():
-    def __init__(self, location_name, prior="uniform", graph_maker=None):
-        self.G, self.H, self.dict_sd = self.load(location_name)
-        self.np_sd, self.np_sub_sd, self.np_sub_sub_sd = self._convert_to_np_sd(self.G, self.dict_sd, self.H)
-        self.g_index = self._make_g_index(self.G)
-        self.h_index = self._make_h_index(self.G, self.H)
-        
-        if prior == "uniform":
-            self._make_uniform_prior()
-        elif prior == "unbalance":
-            if graph_maker is None:
-                raise
-            self._make_unbpr(graph_maker)
-        elif prior == "bus":
-            if graph_maker is None:
-                raise
-            self.np_pr = graph_maker.np_pr
-            self.np_sub_pr = graph_maker.np_sub_pr
     
-    def load(self, location_name):
-        graph_dir = os.path.join("data", "graph")
-        data_dir = os.path.join("data", "graph_data")
-        
-        #G = ox.load_graphml(f'{location_name}.ml',folder=graph_dir)
-        #H = ox.load_graphml(f'sub_{location_name}.ml',folder=graph_dir)
-        G = nx.read_graphml(os.path.join(graph_dir, f'{location_name}.ml'))
-        H = nx.read_graphml(os.path.join(graph_dir, f'sub_{location_name}.ml'))
-        dict_sd = joblib.load(os.path.join(data_dir, f"dict_sd_{location_name}.jbl"))
-
-        return G, H, dict_sd
-    
-    def _convert_to_np_sd(self, G, dict_sd, H=None):
-        if H is None:
-            H = G
+    def __init__(self, location_name, **args):
+        if location_name == "Kyoto":
+            graph, sub_graph, spd, ed, prior = self.load_kyoto(args["latlon_range"], args["prior_type"])
+        else:
+            lat = location_data[location_name]["lat"]
+            lon = location_data[location_name]["lon"]
+            graph, sub_graph, spd, ed, prior = self.load(lat, lon, args["distance"], args["prior_type"], args["simplify"])
             
-        np_sd = np.array([[dict_sd[str(dic_node)][str(node)] for node in G.nodes] for dic_node in G.nodes])
-        np_sub_sd = np.array([[dict_sd[str(dic_node)][str(node)] for node in G.nodes] for dic_node in G.nodes if dic_node in H.nodes])
-        np_sub_sub_sd = np.array([[dict_sd[str(dic_node)][str(node)] for node in G.nodes if node in H.nodes] for dic_node in G.nodes if dic_node in H.nodes])   
-        return np_sd, np_sub_sd, np_sub_sub_sd
-    
-    def make_dict_sd(self, G):
-        gen = nx.all_pairs_dijkstra_path_length(G, weight='length')
-        dict_sd = {node: {node_:0 for node_ in G} for node in G}
+        self.G = graph
+        self.H = sub_graph
+        self.g_index = self._make_g_index(graph)
+        nodes = list(graph.nodes)
+        self.index_g = {i:nodes[i] for i in range(len(nodes))}
+        self.h_index = self._make_h_index(graph, sub_graph)
         
-        for node, dic in gen:
-            for node_, leng in dic.items():
-                dict_sd[node][node_] = leng
-                    
-        return dict_sd
+        self.np_spd, self.np_sub_spd, self.np_sub_sub_spd = self._convert_to_np_spd(graph, sub_graph, spd)
+        self.np_ed, self.np_sub_ed, self.np_sub_sub_ed = self._convert_to_np_spd(graph, sub_graph, ed)
+        self.np_pr, self.np_sub_pr = self._cp_np_pr(graph, sub_graph, prior)
+    
+    def load(self, lat, lon, distance, prior_type, simplify=False):
+        data_name = f"{lat}_{lon}_{distance}_simplify{simplify}"
+        graph_data_dir = graph_dir / f"{data_name}.ml"
+        sub_graph_data_dir = graph_dir / f"sub_{data_name}.ml"
+        spd_data_dir = spd_dir / f"{data_name}.json"
+        ed_data_dir = ed_dir / f"{data_name}.json"
+        prior_data_dir = prior_dir /  f"{data_name}_{prior_type}.json"
+        
+        if graph_data_dir.exists() and sub_graph_data_dir.exists() and spd_data_dir.exists() and prior_data_dir.exists() and ed_data_dir.exists():
+            logger.info(f"loading cached file from {graph_data_dir}")
+            graph = ox.load_graphml(graph_data_dir)
+            graph = nx.relabel_nodes(graph, str)
+            sub_graph = ox.load_graphml(sub_graph_data_dir)
+            sub_graph = nx.relabel_nodes(sub_graph, str)
+            with open(spd_data_dir, "r") as f:
+                spd = json.load(f)
+            with open(prior_data_dir, "r") as f:
+                prior = json.load(f)
+            with open(ed_data_dir, "r") as f:
+                ed = json.load(f)
+                
+        else:
+            logger.info(f"constructing graph and computing auxiliary information take some time")
+            gm = MapGraphMaker()
+            logger.info(f"constructing graph")
+            graph, sub_graph = gm.make_graph(lat, lon, distance, simplify)
+            graph = nx.relabel_nodes(graph, str)
+            sub_graph = nx.relabel_nodes(sub_graph, str)
+            logger.info(f"computing shortest path distances")
+            spd = gm.compute_shortest_path_distance_dict(graph)
+            logger.info(f"computing euclidean distances")
+            ed = gm.compute_euclidean_distance_dict(graph)
+            
+            ox.save_graphml(graph, graph_data_dir)
+            ox.save_graphml(sub_graph, sub_graph_data_dir)
+            with open(spd_data_dir, "w") as f:
+                json.dump(spd, f)
+            with open(ed_data_dir, "w") as f:
+                json.dump(ed, f)
+            if prior_type == UNIFORM:
+                prior = gm.make_uniform_prior_distribution(graph, sub_graph)
+            with open(prior_data_dir, "w") as f:
+                json.dump(prior, f)
+            logger.info(f"saved graph to {graph_data_dir}")
+            logger.info(f"saved spd to {spd_data_dir}")
+            logger.info(f"saved ed to {ed_data_dir}")
+            logger.info(f"saved prior to {prior_data_dir}")
+            
+        logger.info(f"the number of nodes all: {len(graph)}, sub: {len(sub_graph)}")
+        
+        return graph, sub_graph, spd, ed, prior
+        
+    
+    def _cp_np_pr(self, G, H, prior):
+        np_pr = np.zeros((len(G.nodes), 1))
+        np_sub_pr = np.zeros((len(H.nodes), 1))
+        
+        for i, node in enumerate(H.nodes):
+            np_pr[self.g_index[node], 0] = prior[node]
+            np_sub_pr[self.h_index[node], 0] = prior[node]
+        return np_pr, np_sub_pr
+    
+            
+    def load_kyoto(self, latlon_range, prior_type):
+        data_name = f"Kyoto_{latlon_range.min_lat}_{latlon_range.max_lat}_{latlon_range.min_lon}_{latlon_range.max_lon}"
+        self.data_name = data_name
+        
+        graph_data_dir = graph_dir / f"{data_name}.ml"
+        spd_data_dir = spd_dir / f"{data_name}.json"
+        prior_data_dir = prior_dir /  f"{data_name}_{prior_type}.json"
+        
+        if graph_data_dir.exists() and spd_data_dir.exists() and prior_data_dir.exists():
+            logger.info(f"loading graph from {graph_data_dir}")
+            logger.info(f"loading spd from {spd_data_dir}")
+            logger.info(f"loading prior from {prior_data_dir}")
+            
+            graph = ox.load_graphml(graph_data_dir)
+            graph = nx.relabel_nodes(graph, str)
+            with open(spd_data_dir, "r") as f:
+                spd = json.load(f)
+            with open(prior_data_dir, "r") as f:
+                prior = json.load(f)
+            
+        else:
+            logger.info(f"constructing graph and computing auxiliary information take some time")
+            gm = KyotoMapGraphMaker()
+            graph, sub_graph = gm.make_graph(latlon_range)
+            spd = gm.compute_shortest_path_distance_dict(graph)
+            graph = nx.relabel_nodes(graph, str)
+            ox.save_graphml(graph, graph_data_dir)
+            with open(spd_data_dir, "w") as f:
+                json.dump(spd, f)
+            
+            if prior_type == BUS:
+                prior = gm.make_prior_distribution(graph, spd)
+            with open(prior_data_dir, "w") as f:
+                json.dump(prior, f)
+            logger.info(f"saved graph to {graph_data_dir}")
+            logger.info(f"saved spd to {spd_data_dir}")
+            logger.info(f"saved prior to {prior_data_dir}")
+        
+        return graph, graph, spd, None, prior
+    
+    def _convert_to_np_spd(self, G, H, spd):
+            
+        np_spd = np.array([[spd[dic_node][node] for node in G.nodes] for dic_node in G.nodes])
+        np_sub_spd = np.array([[spd[dic_node][node] for node in G.nodes] for dic_node in G.nodes if dic_node in H.nodes])
+        np_sub_sub_spd = np.array([[spd[dic_node][node] for node in G.nodes if node in H.nodes] for dic_node in G.nodes if dic_node in H.nodes])   
+        return np_spd, np_sub_spd, np_sub_sub_spd
+    
+    def _compute_Euclidean_distance(self, coords, ids):
+        euclidean_distances = {id:[np.linalg.norm(coords[id]-coords[id_in]) for id_in in ids] for id in ids}
+        return euclidean_distances
     
     def _make_g_index(self, G):
         return {node:list(self.G.nodes()).index(node) for node in self.G}
@@ -60,33 +161,3 @@ class DataLoader():
     def _make_h_index(self, G, H):
         h_node = [node for node in G.nodes if node in H.nodes]
         return {node:h_node.index(node) for node in H.nodes}
-    
-    
-    def _make_uniform_prior(self):
-        n_graph_nodes = len(self.G)
-        n_sub_graph_nodes = len(self.H)
-        
-        np_pr = np.zeros((n_graph_nodes,1))
-        np_sub_pr = np.zeros((n_sub_graph_nodes,1))
-        for node in self.H.nodes():
-            node_ind = self.g_index[node]
-            sub_node_ind = self.h_index[node]
-            np_pr[node_ind][0] = 1/n_sub_graph_nodes
-            np_sub_pr[sub_node_ind][0] = 1/n_sub_graph_nodes
-            
-        self.np_pr = np_pr
-        self.np_sub_pr = np_sub_pr
-        
-    def _make_unbpr(self, graph_maker):
-        k = 0.00003
-        pr = np.zeros((len(self.G), 1))
-        high_points = [graph_maker.high_point1, graph_maker.high_point2, graph_maker.high_point3, graph_maker.high_point4]
-        sums = 0
-        for node in high_points:
-            node_ind = self.g_index[str(node)]
-            scores = np.exp(-k * np.power(self.np_sd[node_ind],2)).reshape((len(self.G), 1))
-            pr += scores
-            sums += scores.sum()
-        pr /= sums
-        self.np_pr = pr
-        self.np_sub_pr = pr
