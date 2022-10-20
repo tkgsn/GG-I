@@ -23,6 +23,9 @@ with open('/GG-I/data/log_config.json', 'r') as f:
 config.dictConfig(log_conf)
 logger = getLogger("sub_module")
 
+with open('/GG-I/data/location_data.json', 'r') as f:
+    location_data = json.load(f)
+
 
 # cutoff_value = 3000
 class GraphMaker():
@@ -53,6 +56,16 @@ class MapGraphMaker(GraphMaker):
     def __init__(self):
         pass
     
+    def register_dir(self, data_name, prior_type):
+        self.graph_data_dir = graph_dir / f"{data_name}.ml"
+        self.sub_graph_data_dir = graph_dir / f"sub_{data_name}.ml"
+        self.spd_data_dir = spd_dir / f"{data_name}.json"
+        self.ed_data_dir = ed_dir / f"{data_name}.json"
+        self.prior_data_dir = prior_dir /  f"{data_name}_{prior_type}.json"
+        
+    def check_existence(self):
+        return self.graph_data_dir.exists() and self.sub_graph_data_dir.exists() and self.spd_data_dir.exists() and self.prior_data_dir.exists() and self.ed_data_dir.exists()
+    
     def compute_euclidean_distance_dict(self, graph):
         euclidean_distance_dict = {node:{node_in:util.haversine(float(graph.nodes[node]["x"]), float(graph.nodes[node]["y"]), float(graph.nodes[node_in]["x"]), float(graph.nodes[node_in]["y"])) for node_in in graph.nodes()} for node in graph.nodes()}
         return euclidean_distance_dict
@@ -81,18 +94,53 @@ class MapGraphMaker(GraphMaker):
         max_lon = max(lons)
         return min_lat, max_lat, min_lon, max_lon
     
-class TruncatedMapGraphMaker(MapGraphMaker):
+    def load(self):
+        
+        logger.info(f"loading cached file from {self.graph_data_dir}")
+        graph = ox.load_graphml(self.graph_data_dir)
+        graph = nx.relabel_nodes(graph, str)
+        sub_graph = ox.load_graphml(self.sub_graph_data_dir)
+        sub_graph = nx.relabel_nodes(sub_graph, str)
+        with open(self.spd_data_dir, "r") as f:
+            spd = json.load(f)
+        with open(self.prior_data_dir, "r") as f:
+            prior = json.load(f)
+        with open(self.ed_data_dir, "r") as f:
+            ed = json.load(f)
+            
+        return graph, sub_graph, spd, ed, prior
     
-    def __init__(self, lat, lon, distance, prior_type, simplify, **kwargs):
-        n_graph_nodes = kwargs["n_chosen"]
+    def save(self, graph, sub_graph, spd, ed, prior):
+
+        ox.write_graphml(graph, self.graph_data_dir)
+        ox.write_graphml(sub_graph, self.sub_graph_data_dir)
+        with open(self.spd_data_dir, "w") as f:
+            json.dump(spd, f)
+        with open(self.ed_data_dir, "w") as f:
+            json.dump(ed, f)
+        with open(self.prior_data_dir, "w") as f:
+            json.dump(prior, f)
+        logger.info(f"saved graph to {self.graph_data_dir}")
+        logger.info(f"saved spd to {self.spd_data_dir}")
+        logger.info(f"saved ed to {self.ed_data_dir}")
+        logger.info(f"saved prior to {self.prior_data_dir}")
+
+class TruncatedMapGraphMaker(MapGraphMaker):
+
+    def __init__(self, **kwargs):
+        location_name = kwargs["location"]
+        lat = location_data[location_name]["lat"]
+        lon = location_data[location_name]["lon"]
+        distance = kwargs["distance"]
+        prior_type = kwargs["prior_type"]
+        simplify = kwargs["simplify"]
+        n_graph_nodes = kwargs["n_graph_nodes"]
+        
         self.original_data_name = f"{lat}_{lon}_{distance}_simplify{simplify}"
-        self.data_name = f"{lat}_{lon}_{distance}_simplify{simplify}_ngraphnodes{n_graph_nodes}"
-        self.graph_data_dir = graph_dir / f"{self.data_name}.ml"
         self.original_graph_data_dir = graph_dir / f"{self.original_data_name}.ml"
-        self.sub_graph_data_dir = graph_dir / f"sub_{self.data_name}.ml"
-        self.spd_data_dir = spd_dir / f"{self.data_name}.json"
-        self.ed_data_dir = ed_dir / f"{self.data_name}.json"
-        self.prior_data_dir = prior_dir /  f"{self.data_name}_{prior_type}.json"
+        
+        self.data_name = f"{lat}_{lon}_{distance}_simplify{simplify}_ngraphnodes{n_graph_nodes}"
+        self.register_dir(self.data_name, prior_type)
         
         if self.original_graph_data_dir.exists():
             logger.info(f"loading original graph from {self.original_graph_data_dir}")
@@ -106,12 +154,12 @@ class TruncatedMapGraphMaker(MapGraphMaker):
             ox.save_graphml(graph, self.original_graph_data_dir)
             
         
-    def check_existence(self):
-        return self.graph_data_dir.exists() and self.sub_graph_data_dir.exists() and self.spd_data_dir.exists() and self.prior_data_dir.exists() and self.ed_data_dir.exists()
+    # def make_graph(self, lat, lon, distance, simplify, **kwargs):
+    def make_graph(self, **kwargs):
+        distance = kwargs["distance"]
+        simplify = kwargs["simplify"]
+        n_chosen = kwargs["n_graph_nodes"]
         
-    def make_graph(self, lat, lon, distance, simplify, **kwargs):
-        
-        n_chosen = kwargs["n_chosen"]
         all_nodes = list(self.original_graph.nodes(data=True))
         
         if n_chosen == 0:
@@ -131,31 +179,19 @@ class TruncatedMapGraphMaker(MapGraphMaker):
         graph.graph["crs"] = self.original_graph.graph["crs"]
 
         return graph, graph
-    
-    def load(self):
-        
-        logger.info(f"loading cached file from {self.graph_data_dir}")
-        graph = ox.load_graphml(self.graph_data_dir)
-        graph = nx.relabel_nodes(graph, str)
-        sub_graph = ox.load_graphml(self.sub_graph_data_dir)
-        sub_graph = nx.relabel_nodes(sub_graph, str)
-        with open(self.spd_data_dir, "r") as f:
-            spd = json.load(f)
-        with open(self.prior_data_dir, "r") as f:
-            prior = json.load(f)
-        with open(self.ed_data_dir, "r") as f:
-            ed = json.load(f)
-            
-        return graph, sub_graph, spd, ed, prior
-    
+
+    def compute_shortest_path_distance_dict(self, graph, weight="length"):
+
+        shortest_path_distance_dict = {node:{} for node in graph.nodes()}
+        for node in tqdm(graph.nodes()):
+            shortest_path_distances = nx.single_source_dijkstra_path_length(self.original_graph, node, weight=weight)
+            shortest_path_distance_dict[node] = {node:shortest_path_distances[node] for node in graph.nodes()}
+        return shortest_path_distance_dict
+
     def save(self, graph, sub_graph, spd, ed, prior):
 
-        # graph.graph["crs"] = self.original_graph.graph["crs"]
-        # sub_graph.graph["crs"] = self.original_graph.graph["crs"]
         nx.write_graphml(graph, self.graph_data_dir)
         nx.write_graphml(sub_graph, self.sub_graph_data_dir)
-        # ox.save_graphml(graph, self.graph_data_dir)
-        # ox.save_graphml(sub_graph, self.sub_graph_data_dir)
         with open(self.spd_data_dir, "w") as f:
             json.dump(spd, f)
         with open(self.ed_data_dir, "w") as f:
@@ -166,16 +202,6 @@ class TruncatedMapGraphMaker(MapGraphMaker):
         logger.info(f"saved spd to {self.spd_data_dir}")
         logger.info(f"saved ed to {self.ed_data_dir}")
         logger.info(f"saved prior to {self.prior_data_dir}")
-
-
-    def compute_shortest_path_distance_dict(self, graph, weight="length"):
-
-        shortest_path_distance_dict = {node:{} for node in graph.nodes()}
-        for node in tqdm(graph.nodes()):
-            shortest_path_distances = nx.single_source_dijkstra_path_length(self.original_graph, node, weight=weight)
-            shortest_path_distance_dict[node] = {node:shortest_path_distances[node] for node in graph.nodes()}
-        return shortest_path_distance_dict
-
 
 k = 0.001
 class KyotoMapGraphMaker(MapGraphMaker):
@@ -199,31 +225,33 @@ class KyotoMapGraphMaker(MapGraphMaker):
     
     def graph_height(self):
         return KyotoGraphMaker.g.inv(self.min_lon, self.min_lat, self.min_lon, self.max_lat)[2]
-
-    def __init__(self):
-        self.name = "Kyoto"
+    
+    def __init__(self, **kwargs):
         self.kyoto_graph = self._load_kyoto_graph()
+        
+        self.data_name = f"{kwargs['min_lat']}_{kwargs['max_lat']}_{kwargs['min_lon']}_{kwargs['max_lon']}"
+        self.register_dir(self.data_name, kwargs["prior_type"])
         
     def _load_kyoto_graph(self):
         kyoto_graph_path = graph_dir / "kyotoshi.ml"
         if kyoto_graph_path.exists():
-            logger.info(f"loading cached file from {kyoto_graph_path}")
+            logger.info(f"loading cached Kyoto graph from {kyoto_graph_path}")
             kyoto_graph = ox.load_graphml(kyoto_graph_path)
             kyoto_graph = nx.relabel_nodes(kyoto_graph, str)
         else:
-            logger.info("downloading from OpenStreetMap with keyword \"kyoto\" takes some time")
+            logger.info("downloading from OpenStreetMap with keyword \"Kyoto\" takes some time")
             kyoto_graph = ox.graph_from_place("Kyoto", simplify=True)
             kyoto_graph = nx.relabel_nodes(kyoto_graph, str)
             ox.save_graphml(kyoto_graph, kyoto_graph_path)
         return kyoto_graph
 
-    def make_graph(self, latlon_range):
+    def make_graph(self, **kwargs):
 
         truncated_graph = copy.deepcopy(self.kyoto_graph)
         for node in self.kyoto_graph.nodes(data=True):
             lat = node[1]["y"]
             lon = node[1]["x"]
-            if (latlon_range.min_lat > lat) or (latlon_range.max_lat < lat) or (latlon_range.min_lon > lon) or (latlon_range.max_lon < lon):
+            if (kwargs["min_lat"] > lat) or (kwargs["max_lat"] < lat) or (kwargs["min_lon"] > lon) or (kwargs["max_lon"] < lon):
                 truncated_graph.remove_node(node[0])
         truncated_graph = truncated_graph.to_undirected()      
     

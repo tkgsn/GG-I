@@ -12,8 +12,12 @@ parser.add_argument("--n_optgeoi_nodes", default=100, type=int)
 parser.add_argument("--n_graph_nodes", default=0, type=int)
 parser.add_argument("--epsilon", default=0.001, type=float)
 parser.add_argument("--delta", default=1.3, type=float)
-parser.add_argument("--prior", default="uniform", type=str)
+parser.add_argument("--prior_type", default="uniform", type=str)
 parser.add_argument("--simplify", action="store_true")
+parser.add_argument("--min_lat", default=35.02, type=float)
+parser.add_argument("--max_lat", default=35.04, type=float)
+parser.add_argument("--min_lon", default=135.76, type=float)
+parser.add_argument("--max_lon", default=135.78, type=float)
 args = parser.parse_args()
 
 strtmec = {"GEM": GraphExponentialMechanism,
@@ -24,10 +28,10 @@ strtmec = {"GEM": GraphExponentialMechanism,
 
 if __name__ == "__main__":
 
-    data_loader = DataLoader(args.location, distance=args.distance, prior_type=args.prior, simplify=args.simplify, n_graph_nodes=args.n_graph_nodes)
+    data_loader = DataLoader(args.location, **vars(args))
     mechanism = strtmec[args.mechanism](data_loader, **vars(args))
         
-    save_dir = result_dir / f"{args.location}_{args.distance}_simplify{args.simplify}_ngraphnodes{args.n_graph_nodes}"
+    save_dir = result_dir / f"{data_loader.data_name}"
     save_dir.mkdir(parents=True, exist_ok=True)
     with open(save_dir / f"{mechanism}.json", "w") as f:
         json.dump(score(mechanism), f)

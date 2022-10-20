@@ -3,7 +3,7 @@ import numpy as np
 import os
 import networkx as nx
 from src.my_util import LatlonRange, graph_dir, spd_dir, prior_dir, ed_dir
-from src.graph_maker import MapGraphMaker, KyotoMapGraphMaker, TruncatedMapGraphMaker
+from src.graph_maker import KyotoMapGraphMaker, TruncatedMapGraphMaker
 import json
 
 from logging import getLogger, config
@@ -15,18 +15,15 @@ logger = getLogger("sub_module")
 BUS = "bus"
 UNIFORM = "uniform"
 
-with open('/GG-I/data/location_data.json', 'r') as f:
-    location_data = json.load(f)
+
+
+ChoicedMapGraphMaker = lambda location: KyotoMapGraphMaker if location == "Kyoto" else TruncatedMapGraphMaker
 
 class DataLoader():
     
     def __init__(self, location_name, **args):
-        if location_name == "Kyoto":
-            graph, sub_graph, spd, ed, prior = self.load_kyoto(args["latlon_range"], args["prior_type"])
-        else:
-            lat = location_data[location_name]["lat"]
-            lon = location_data[location_name]["lon"]
-            graph, sub_graph, spd, ed, prior = self.load(lat, lon, args["distance"], args["prior_type"], args["simplify"], args["n_graph_nodes"])
+        
+        graph, sub_graph, spd, ed, prior = self.load(location_name, **args)
             
         self.G = graph
         self.H = sub_graph
@@ -39,9 +36,9 @@ class DataLoader():
         self.np_ed, self.np_sub_ed, self.np_sub_sub_ed = self._convert_to_np_spd(graph, sub_graph, ed)
         self.np_pr, self.np_sub_pr = self._cp_np_pr(graph, sub_graph, prior)
         
-    def load(self, lat, lon, distance, prior_type, simplify=False, n_graph_nodes=0):
+    def load(self, location_name, **kwargs):
         
-        gm = TruncatedMapGraphMaker(lat, lon, distance, prior_type, simplify, n_chosen=n_graph_nodes)
+        gm = ChoicedMapGraphMaker(location_name)(**kwargs)
         
         if gm.check_existence():
             graph, sub_graph, spd, ed, prior = gm.load()
@@ -49,19 +46,27 @@ class DataLoader():
         else:
             logger.info(f"constructing graph and computing auxiliary information take some time")
             logger.info(f"constructing graph")
-            graph, sub_graph = gm.make_graph(lat, lon, distance, simplify, n_chosen=n_graph_nodes)
+            # graph, sub_graph = gm.make_graph(lat, lon, distance, simplify, n_chosen=n_graph_nodes)
+            graph, sub_graph = gm.make_graph(**kwargs)
             graph = nx.relabel_nodes(graph, str)
             sub_graph = nx.relabel_nodes(sub_graph, str)
             logger.info(f"computing shortest path distances")
             spd = gm.compute_shortest_path_distance_dict(graph)
             logger.info(f"computing euclidean distances")
             ed = gm.compute_euclidean_distance_dict(graph)
-            if prior_type == UNIFORM:
+            if kwargs["prior_type"] == UNIFORM:
+                logger.info(f"making uniform prior distribution")
                 prior = gm.make_uniform_prior_distribution(graph, sub_graph)
+            elif kwargs["prior_type"] == BUS:
+                if location_name != "Kyoto":
+                    raise
+                logger.info(f"making prior distribution from shibus data")
+                prior = gm.make_prior_distribution(graph, spd)
             
             gm.save(graph, sub_graph, spd, ed, prior)
             
         logger.info(f"the number of nodes all: {len(graph)}, sub: {len(sub_graph)}")
+        self.data_name = gm.data_name
         
         return graph, sub_graph, spd, ed, prior
         
