@@ -10,6 +10,6 @@ WORKDIR /GG-I
 RUN pip install --upgrade pip \
     && pip install -r requirements.txt
 
-ENV DATA_DIR /data/GG-I_data
+ENV DATA_DIR /data
 
 CMD ["jupyter", "lab", "--ip=0.0.0.0", "--allow-root", "--no-browser", "--NotebookApp.token=''"]

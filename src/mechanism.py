@@ -111,6 +111,9 @@ class Mechanism():
     
 class PlanarLaplaceMechanismOnGraph(Mechanism):
     
+    def __str__(self):
+        return f"PLMG_{self.epsilon}"
+    
     def build_distribution(self, **kwargs):
         start_time = time.time()
         
