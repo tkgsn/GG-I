@@ -5,6 +5,7 @@ from scipy.spatial import Voronoi, voronoi_plot_2d
 import matplotlib.pyplot as plt
 from scipy.integrate import quad, dblquad
 import src.my_util as util
+from tqdm import tqdm
 
 #垂直二等分線
 def per_bi(a_x,a_y,b_x,b_y):
@@ -132,9 +133,10 @@ class MakePLG:
     def cp_dist(self):
         self.dist = {}
         count = 0
-        for i,point in enumerate(self.vor.points):
+        i = 0
+        for point in tqdm(self.vor.points):
             if list(self.G.nodes())[i] in list(self.H.nodes()):
-                print(f"\r{count}/{len(self.H.nodes)}", end="")
+                # print(f"\r{count}/{len(self.H.nodes)}", end="")
                 count += 1
                 dist_dict = {}
                 array = []
@@ -165,6 +167,7 @@ class MakePLG:
             else:
                 continue
             self.dist[list(self.G.nodes())[i]] = dist_dict 
+            i+=1
     
     
     def make_plg(self):  

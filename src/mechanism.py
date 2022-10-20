@@ -9,6 +9,7 @@ import copy
 import src.make_plg as plg_maker
 import json
 from src.graph_maker import apply_spanner
+import time
 
 
 from logging import getLogger, config
@@ -24,13 +25,14 @@ def score(mec):
     score["bayes_AE"] = mec.compute_AE(attack="bayes")
     score["optimal_PC"] = score["optimal_AE"]/score["SQL"]
     score["bayes_PC"] = score["bayes_AE"]/score["SQL"]
+    score["time"] = mec.time
     return score
 
 class Mechanism():
     def __init__(self, data_loader, **kwargs):
-        logger.info(f"initializing {self} with {kwargs}")
         self.data_loader = data_loader
         self.build_distribution(**kwargs)
+        logger.info(f"initialized {self} with {kwargs}")
         
     def __str__(self):
         return "SUPER"
@@ -54,6 +56,7 @@ class Mechanism():
             pass
         logger.debug(self.data_loader.np_pr)
         self.sql = np.sum(self.dist * self.data_loader.np_pr * self.data_loader.np_spd)
+        logger.info(f"SQL: {self.sql}")
         return self.sql
     
     def compute_AE(self, euclid=False, attack="optimal"):
@@ -73,14 +76,15 @@ class Mechanism():
             self.lp = np.sum(self.rem * np.dot(temp.T, self.sub_est))
         else:
             self.ae = np.sum(remap * np.dot(dist.T, self.data_loader.np_sub_sub_spd))
+            logger.info(f"AE: {self.ae}")
             return self.ae
             
     def _compute_inference_function(self, euclid=False):
-        logger.info("setting variables")
+        logger.info("setting variables, constraints, the objective function for computing optimal inference function")
         remapping = [[pulp.LpVariable(perturbed_node+","+inf_node,0,1,'Continuous') for inf_node in self.data_loader.H.nodes] for perturbed_node in self.data_loader.G.nodes]
         problem = pulp.LpProblem('AE', pulp.LpMinimize)
         #目的関数
-        logger.info("setting the objective function.")
+        # logger.info("setting the objective function.")
 
         dist = self.dist * self.data_loader.np_pr
         indice = np.array([self.data_loader.g_index[node] for node in self.data_loader.G if node in self.data_loader.H.nodes])
@@ -91,43 +95,55 @@ class Mechanism():
         else:
             problem += pulp.lpSum(remapping * np.dot(dist.T, self.data_loader.np_sub_sub_spd))
         #制約 Σk_xz = 1
-        logger.info("setting costraints.")
+        # logger.info("setting costraints.")
         for i in range(len(self.data_loader.G)):
             problem += pulp.lpSum(remapping[i]) == 1.0
         #計算
-        logger.info("solving..")
-        status = problem.solve(pulp.PULP_CBC_CMD(msg=1))
+        logger.info("solving the optimization problem")
+        status = problem.solve(pulp.PULP_CBC_CMD(msg=0))
         if(status):
-            print(f"the optimal value: {pulp.value(problem.objective)}")
+            # print(f"the optimal value: {pulp.value(problem.objective)}")
             self.obj_value = pulp.value(problem.objective)
             f = np.frompyfunc(lambda x:x.value(), 1, 1)
             return f(remapping)
         else:
-            print("not solved")
+            logger.info("not solved")
     
 class PlanarLaplaceMechanismOnGraph(Mechanism):
     
-    def build_distribution(self, epsilon, is_pr=False):
+    def build_distribution(self, **kwargs):
+        start_time = time.time()
+        
+        epsilon = kwargs["epsilon"]
         self.epsilon = epsilon
         self.dist = np.zeros((len(self.data_loader.G),len(self.data_loader.G)))
+        logger.info("constructing PLMG")
         dist = plg_maker.MakePLG(self.data_loader.G, self.data_loader.H, epsilon, "ox").dist
         for node, dist_ in dist.items():
             node_ind = self.data_loader.g_index[node]
             for node_, prob in dist_.items():
                 node_ind_ = self.data_loader.g_index[node_]
                 self.dist[node_ind][node_ind_] = prob
+        
+        end_time = time.time()
+        self.time = end_time - start_time
 
 class GraphExponentialMechanism(Mechanism):
         
     def __str__(self):
-        return "GraphExponentialMechanism"
+        return f"GEM_{self.epsilon}"
     
     def build_distribution(self, **kwargs):
+        start_time = time.time()
+        
         epsilon = kwargs["epsilon"]
         self.epsilon = epsilon
         
         M = np.exp((-epsilon/2) * self.data_loader.np_spd)
         self.dist = self.normalize(M)
+
+        end_time = time.time()
+        self.time = end_time - start_time
     
     def normalize(self, dist):
         sum_dist = np.sum(dist, axis=1).reshape(-1,1)
@@ -140,7 +156,7 @@ class GraphExponentialMechanism(Mechanism):
 class OptimalGraphExponentialMechanism(GraphExponentialMechanism):
         
     def __str__(self):
-        return "OptimalGraphExponentialMechanism"
+        return f"OptGEM_{self.epsilon}"
     
     def _remove_from_dist(self, rm_list):
         remove_mat = self._make_remove_mat(rm_list)
@@ -155,7 +171,10 @@ class OptimalGraphExponentialMechanism(GraphExponentialMechanism):
         return remove_mat
     
     def build_distribution(self, **kwargs):
+        start_time = time.time()
+        
         epsilon = kwargs["epsilon"]
+        self.epsilon = epsilon
         
         super().build_distribution(**kwargs)
         
@@ -251,6 +270,8 @@ class OptimalGraphExponentialMechanism(GraphExponentialMechanism):
             
         self.dist = self._remove_from_dist(rm_list)
         # self.rm_list = rm_list
+        end_time = time.time()
+        self.time = end_time - start_time
         
     def _make_sql_function(self):
         
@@ -327,19 +348,27 @@ class OptimalGraphExponentialMechanism(GraphExponentialMechanism):
 class OptGeoIMechanism(Mechanism):
 
     def __str__(self):
-        return "OptGeoIMechanism"
+        return f"OptGeoIM_{self.epsilon}_delta{self.delta}_nnodes{self.n_optgeoi_nodes}"
     
+    def apply_spanner(self, **kwargs):
+        return apply_spanner(self.data_loader, kwargs["delta"], kwargs["n_optgeoi_nodes"], "ed")
+        
     def build_distribution(self, **kwargs):
+        start_time = time.time()
+        
         epsilon = kwargs["epsilon"]
+        self.epsilon = epsilon
+        self.delta = kwargs["delta"]
+        self.n_optgeoi_nodes = kwargs["n_optgeoi_nodes"]
         
-        logger.info(f"applying spanner with delta={kwargs['delta']}, n_nodes={kwargs['n_nodes']}")
-        graph, truncated_np_ed, truncated_np_pr, truncated_index_g, truncated_g_index, node_mapping = apply_spanner(self.data_loader, kwargs["delta"], kwargs["n_nodes"])
+        logger.info(f"applying spanner with delta={kwargs['delta']}, n_optgeoi_nodes={kwargs['n_optgeoi_nodes']}")
+        graph, spanner_np_spd, truncated_np_pr, truncated_index_g, truncated_g_index, node_mapping = self.apply_spanner(delta=kwargs["delta"], n_optgeoi_nodes=kwargs["n_optgeoi_nodes"])
         
-        logger.info(f"the number of edges decreases to {len(graph.edges())} from {len(graph.nodes)**2}")
-        logger.info("setting variables and the optimization problem for constructing the OptGeoI distribution")
-        variables = [[pulp.LpVariable(str(id_in)+"_"+str(id),0,1,'Continuous') for id in graph.nodes()] for id_in in graph.nodes()]
+        logger.info(f"the number of edges decreases to {len(graph.edges())} from {len(graph.nodes)*(len(graph.nodes)+1)/2}")
+        logger.info("setting variables and the optimization problem for constructing the optimal distribution")
+        variables = [[pulp.LpVariable(str(node1)+"_"+str(node2),0,1,'Continuous') for node2 in graph.nodes()] for node1 in graph.nodes()]
         problem = pulp.LpProblem('optGeoI', pulp.LpMinimize)
-        problem += pulp.lpSum(variables * truncated_np_pr * truncated_np_ed)
+        problem += pulp.lpSum(variables * truncated_np_pr * spanner_np_spd)
 
         for line_variables in variables:
             problem += pulp.lpSum(line_variables) == 1.0
@@ -351,16 +380,26 @@ class OptGeoIMechanism(Mechanism):
         for edge in graph.edges():
             node_from_index_1 = truncated_g_index[edge[0]]
             node_from_index_2 = truncated_g_index[edge[1]]
-            for node in graph.nodes:
+            for node in graph.nodes():
                 node_to_index = truncated_g_index[node]
                 
-                problem += variables[node_from_index_1][node_to_index] <= np.exp(epsilon * truncated_np_ed[node_from_index_1][node_from_index_2] / kwargs["delta"]) * variables[node_from_index_2][node_to_index]
-                problem += variables[node_from_index_2][node_to_index] <= np.exp(epsilon * truncated_np_ed[node_from_index_1][node_from_index_2] / kwargs["delta"]) * variables[node_from_index_1][node_to_index]
+                if (epsilon * spanner_np_spd[node_from_index_1][node_from_index_2] / kwargs["delta"]) > 40:
+                    continue
+                else:
+                    problem += variables[node_from_index_1][node_to_index] <= np.exp(epsilon * spanner_np_spd[node_from_index_1][node_from_index_2] / kwargs["delta"]) * variables[node_from_index_2][node_to_index]
+                    problem += variables[node_from_index_2][node_to_index] <= np.exp(epsilon * spanner_np_spd[node_from_index_1][node_from_index_2] / kwargs["delta"]) * variables[node_from_index_1][node_to_index]
         
         logger.info("solving the optimization problem")
         status = problem.solve(pulp.PULP_CBC_CMD(msg=0))
+        logger.info(f"status: {status}")
         f = np.frompyfunc(lambda x:x.value(), 1, 1)
-
+        
+        sum_ = 0
+        for variable in variables:
+            for variable_ in variable:
+                sum_ += (variable_.value())
+        
+        print(sum_)
         truncated_dist = f(variables).astype(np.float64)
         
         
@@ -374,3 +413,14 @@ class OptGeoIMechanism(Mechanism):
                 node_to = truncated_index_g[i]
                 index_in_g = self.data_loader.g_index[node_to]
                 self.dist[index][index_in_g] += v
+                
+        end_time = time.time()
+        self.time = end_time - start_time
+        
+class OptGeoGIMechanism(OptGeoIMechanism):
+    
+    def __str__(self):
+        return f"OptGeoGIM_{self.epsilon}_delta{self.delta}_nnodes{self.n_optgeoi_nodes}"
+    
+    def apply_spanner(self, **kwargs):
+        return apply_spanner(self.data_loader, kwargs["delta"], kwargs["n_optgeoi_nodes"], "spd")

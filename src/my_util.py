@@ -20,17 +20,6 @@ result_dir.mkdir(parents=True, exist_ok=True)
 img_dir = pathlib.Path("imgs")
 img_dir.mkdir(parents=True, exist_ok=True)
 
-"""
-def load_data(location_name):
-    graph_dir = "data/graph/"
-    data_dir = "data/graph_data"
-    
-    G = ox.load_graphml(f'{location_name}.ml',folder=graph_dir)
-    H = ox.load_graphml(f'sub_{location_name}.ml',folder=graph_dir)
-    dict_sd = joblib.load(os.path.join(data_dir, f"dict_sd_{location_name}.jbl"))
-    
-    return G, H, dict_sd
-"""
 
 class LatlonRange():
     def __init__(self, min_lat, max_lat, min_lon, max_lon):

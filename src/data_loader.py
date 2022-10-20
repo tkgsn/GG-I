@@ -1,11 +1,9 @@
 import osmnx as ox
-# import joblib
 import numpy as np
 import os
 import networkx as nx
 from src.my_util import LatlonRange, graph_dir, spd_dir, prior_dir, ed_dir
-# import src.graph_maker as graph_maker
-from src.graph_maker import MapGraphMaker, KyotoMapGraphMaker
+from src.graph_maker import MapGraphMaker, KyotoMapGraphMaker, TruncatedMapGraphMaker
 import json
 
 from logging import getLogger, config
@@ -28,7 +26,7 @@ class DataLoader():
         else:
             lat = location_data[location_name]["lat"]
             lon = location_data[location_name]["lon"]
-            graph, sub_graph, spd, ed, prior = self.load(lat, lon, args["distance"], args["prior_type"], args["simplify"])
+            graph, sub_graph, spd, ed, prior = self.load(lat, lon, args["distance"], args["prior_type"], args["simplify"], args["n_graph_nodes"])
             
         self.G = graph
         self.H = sub_graph
@@ -40,54 +38,28 @@ class DataLoader():
         self.np_spd, self.np_sub_spd, self.np_sub_sub_spd = self._convert_to_np_spd(graph, sub_graph, spd)
         self.np_ed, self.np_sub_ed, self.np_sub_sub_ed = self._convert_to_np_spd(graph, sub_graph, ed)
         self.np_pr, self.np_sub_pr = self._cp_np_pr(graph, sub_graph, prior)
-    
-    def load(self, lat, lon, distance, prior_type, simplify=False):
-        data_name = f"{lat}_{lon}_{distance}_simplify{simplify}"
-        graph_data_dir = graph_dir / f"{data_name}.ml"
-        sub_graph_data_dir = graph_dir / f"sub_{data_name}.ml"
-        spd_data_dir = spd_dir / f"{data_name}.json"
-        ed_data_dir = ed_dir / f"{data_name}.json"
-        prior_data_dir = prior_dir /  f"{data_name}_{prior_type}.json"
         
-        if graph_data_dir.exists() and sub_graph_data_dir.exists() and spd_data_dir.exists() and prior_data_dir.exists() and ed_data_dir.exists():
-            logger.info(f"loading cached file from {graph_data_dir}")
-            graph = ox.load_graphml(graph_data_dir)
-            graph = nx.relabel_nodes(graph, str)
-            sub_graph = ox.load_graphml(sub_graph_data_dir)
-            sub_graph = nx.relabel_nodes(sub_graph, str)
-            with open(spd_data_dir, "r") as f:
-                spd = json.load(f)
-            with open(prior_data_dir, "r") as f:
-                prior = json.load(f)
-            with open(ed_data_dir, "r") as f:
-                ed = json.load(f)
+    def load(self, lat, lon, distance, prior_type, simplify=False, n_graph_nodes=0):
+        
+        gm = TruncatedMapGraphMaker(lat, lon, distance, prior_type, simplify, n_chosen=n_graph_nodes)
+        
+        if gm.check_existence():
+            graph, sub_graph, spd, ed, prior = gm.load()
                 
         else:
             logger.info(f"constructing graph and computing auxiliary information take some time")
-            gm = MapGraphMaker()
             logger.info(f"constructing graph")
-            graph, sub_graph = gm.make_graph(lat, lon, distance, simplify)
+            graph, sub_graph = gm.make_graph(lat, lon, distance, simplify, n_chosen=n_graph_nodes)
             graph = nx.relabel_nodes(graph, str)
             sub_graph = nx.relabel_nodes(sub_graph, str)
             logger.info(f"computing shortest path distances")
             spd = gm.compute_shortest_path_distance_dict(graph)
             logger.info(f"computing euclidean distances")
             ed = gm.compute_euclidean_distance_dict(graph)
-            
-            ox.save_graphml(graph, graph_data_dir)
-            ox.save_graphml(sub_graph, sub_graph_data_dir)
-            with open(spd_data_dir, "w") as f:
-                json.dump(spd, f)
-            with open(ed_data_dir, "w") as f:
-                json.dump(ed, f)
             if prior_type == UNIFORM:
                 prior = gm.make_uniform_prior_distribution(graph, sub_graph)
-            with open(prior_data_dir, "w") as f:
-                json.dump(prior, f)
-            logger.info(f"saved graph to {graph_data_dir}")
-            logger.info(f"saved spd to {spd_data_dir}")
-            logger.info(f"saved ed to {ed_data_dir}")
-            logger.info(f"saved prior to {prior_data_dir}")
+            
+            gm.save(graph, sub_graph, spd, ed, prior)
             
         logger.info(f"the number of nodes all: {len(graph)}, sub: {len(sub_graph)}")
         

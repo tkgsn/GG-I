@@ -13,9 +13,10 @@ import os
 import pathlib
 import json
 import functools
-from src.my_util import LatlonRange, graph_dir
+from src.my_util import LatlonRange, graph_dir, spd_dir, prior_dir, ed_dir
 from logging import getLogger, config
 import random
+from tqdm import tqdm
 
 with open('/GG-I/data/log_config.json', 'r') as f:
     log_conf = json.load(f)
@@ -23,6 +24,7 @@ config.dictConfig(log_conf)
 logger = getLogger("sub_module")
 
 
+# cutoff_value = 3000
 class GraphMaker():
     def __init__(self):
         pass
@@ -30,13 +32,15 @@ class GraphMaker():
     def make_graph(self):
         pass
     
-    def compute_shortest_path_distance_dict(self, graph):
-        shortest_path_distance_dict = dict(nx.all_pairs_dijkstra_path_length(graph, weight='length'))
-        self.shortest_path_distance_dict = {node:{} for node in graph.nodes}
+    def compute_shortest_path_distance_dict(self, graph, weight="length"):
+        # shortest_path_distance_dict = dict(nx.all_pairs_dijkstra_path_length(graph, weight=weight, cutoff=cutoff))
+        shortest_path_distance_dict = dict(nx.all_pairs_dijkstra_path_length(graph, weight=weight))
+        _shortest_path_distance_dict = {node:{} for node in graph.nodes}
         for node in graph.nodes:
             for node_ in graph.nodes:
-                shortest_path_distance_dict[node][node_] = shortest_path_distance_dict[node][node_] if node_ in list(shortest_path_distance_dict[node].keys()) else 0
-        return shortest_path_distance_dict
+                # shortest_path_distance_dict[node][node_] = shortest_path_distance_dict[node][node_] if node_ in list(shortest_path_distance_dict[node].keys()) else 0
+                _shortest_path_distance_dict[node][node_] = shortest_path_distance_dict[node][node_] if node_ in list(shortest_path_distance_dict[node].keys()) else cutoff_value
+        return _shortest_path_distance_dict
 
     def make_uniform_prior_distribution(self, graph, sub_graph):
         n_sub_graph_nodes = len(sub_graph)
@@ -53,7 +57,7 @@ class MapGraphMaker(GraphMaker):
         euclidean_distance_dict = {node:{node_in:util.haversine(float(graph.nodes[node]["x"]), float(graph.nodes[node]["y"]), float(graph.nodes[node_in]["x"]), float(graph.nodes[node_in]["y"])) for node_in in graph.nodes()} for node in graph.nodes()}
         return euclidean_distance_dict
     
-    def make_graph(self, lat, lon, distance, simplify=False):
+    def make_graph(self, lat, lon, distance, simplify, **kwargs):
         name = f"{lat}_{lon}_{distance}_symplify{simplify}.ml"
         sub_name = f"sub_{lat}_{lon}_{distance}_symplify{simplify}.ml"
         graph_data_dir = graph_dir / name
@@ -76,6 +80,101 @@ class MapGraphMaker(GraphMaker):
         min_lon = min(lons)
         max_lon = max(lons)
         return min_lat, max_lat, min_lon, max_lon
+    
+class TruncatedMapGraphMaker(MapGraphMaker):
+    
+    def __init__(self, lat, lon, distance, prior_type, simplify, **kwargs):
+        n_graph_nodes = kwargs["n_chosen"]
+        self.original_data_name = f"{lat}_{lon}_{distance}_simplify{simplify}"
+        self.data_name = f"{lat}_{lon}_{distance}_simplify{simplify}_ngraphnodes{n_graph_nodes}"
+        self.graph_data_dir = graph_dir / f"{self.data_name}.ml"
+        self.original_graph_data_dir = graph_dir / f"{self.original_data_name}.ml"
+        self.sub_graph_data_dir = graph_dir / f"sub_{self.data_name}.ml"
+        self.spd_data_dir = spd_dir / f"{self.data_name}.json"
+        self.ed_data_dir = ed_dir / f"{self.data_name}.json"
+        self.prior_data_dir = prior_dir /  f"{self.data_name}_{prior_type}.json"
+        
+        if self.original_graph_data_dir.exists():
+            logger.info(f"loading original graph from {self.original_graph_data_dir}")
+            graph = ox.load_graphml(self.original_graph_data_dir)
+            self.original_graph = nx.relabel_nodes(graph, str)
+        else:
+            logger.info(f"constructing original graph")
+            graph, sub_graph = super().make_graph(lat, lon, distance, simplify)
+            self.original_graph = nx.relabel_nodes(graph, str)
+            logger.info(f"saving original graph to {self.original_graph_data_dir}")
+            ox.save_graphml(graph, self.original_graph_data_dir)
+            
+        
+    def check_existence(self):
+        return self.graph_data_dir.exists() and self.sub_graph_data_dir.exists() and self.spd_data_dir.exists() and self.prior_data_dir.exists() and self.ed_data_dir.exists()
+        
+    def make_graph(self, lat, lon, distance, simplify, **kwargs):
+        
+        n_chosen = kwargs["n_chosen"]
+        all_nodes = list(self.original_graph.nodes(data=True))
+        
+        if n_chosen == 0:
+            nodes = all_nodes
+        else:
+            random.seed(0)
+            nodes = []
+            while (len(nodes) < n_chosen) and (len(nodes) != len(all_nodes)):
+                choiced = random.choice(all_nodes)
+                if choiced not in nodes:
+                    nodes.append(choiced)
+        
+        logger.info(f"truncated by {len(nodes)} from {len(all_nodes)}")
+
+        graph = nx.Graph()
+        graph.add_nodes_from(nodes)
+        graph.graph["crs"] = self.original_graph.graph["crs"]
+
+        return graph, graph
+    
+    def load(self):
+        
+        logger.info(f"loading cached file from {self.graph_data_dir}")
+        graph = ox.load_graphml(self.graph_data_dir)
+        graph = nx.relabel_nodes(graph, str)
+        sub_graph = ox.load_graphml(self.sub_graph_data_dir)
+        sub_graph = nx.relabel_nodes(sub_graph, str)
+        with open(self.spd_data_dir, "r") as f:
+            spd = json.load(f)
+        with open(self.prior_data_dir, "r") as f:
+            prior = json.load(f)
+        with open(self.ed_data_dir, "r") as f:
+            ed = json.load(f)
+            
+        return graph, sub_graph, spd, ed, prior
+    
+    def save(self, graph, sub_graph, spd, ed, prior):
+
+        # graph.graph["crs"] = self.original_graph.graph["crs"]
+        # sub_graph.graph["crs"] = self.original_graph.graph["crs"]
+        nx.write_graphml(graph, self.graph_data_dir)
+        nx.write_graphml(sub_graph, self.sub_graph_data_dir)
+        # ox.save_graphml(graph, self.graph_data_dir)
+        # ox.save_graphml(sub_graph, self.sub_graph_data_dir)
+        with open(self.spd_data_dir, "w") as f:
+            json.dump(spd, f)
+        with open(self.ed_data_dir, "w") as f:
+            json.dump(ed, f)
+        with open(self.prior_data_dir, "w") as f:
+            json.dump(prior, f)
+        logger.info(f"saved graph to {self.graph_data_dir}")
+        logger.info(f"saved spd to {self.spd_data_dir}")
+        logger.info(f"saved ed to {self.ed_data_dir}")
+        logger.info(f"saved prior to {self.prior_data_dir}")
+
+
+    def compute_shortest_path_distance_dict(self, graph, weight="length"):
+
+        shortest_path_distance_dict = {node:{} for node in graph.nodes()}
+        for node in tqdm(graph.nodes()):
+            shortest_path_distances = nx.single_source_dijkstra_path_length(self.original_graph, node, weight=weight)
+            shortest_path_distance_dict[node] = {node:shortest_path_distances[node] for node in graph.nodes()}
+        return shortest_path_distance_dict
 
 
 k = 0.001
@@ -227,7 +326,7 @@ class LatticeGraphMaker(GraphMaker):
         
 
 
-def apply_spanner(data_loader, delta, n_nodes):
+def apply_spanner(data_loader, delta, n_nodes, distance_type="spd"):
 
     spanner = nx.Graph()
     
@@ -235,8 +334,15 @@ def apply_spanner(data_loader, delta, n_nodes):
         n_nodes = len(data_loader.G)
         
     logger.info(f"chosen node is fixed by seed {0}")
+
+    candidate_nodes = list(data_loader.G.nodes(data=True))
+    nodes = []
     random.seed(0)
-    nodes = random.sample(data_loader.G.nodes(data=True), n_nodes)
+    while len(nodes) < n_nodes:
+        choiced = random.choice(candidate_nodes)
+        if choiced not in nodes:
+            nodes.append(choiced)
+        
     spanner.add_nodes_from(nodes)
     spanner.graph["crs"] = data_loader.G.graph["crs"]
     
@@ -251,16 +357,22 @@ def apply_spanner(data_loader, delta, n_nodes):
     for index in sorted_indice:
         node_from = truncated_index_g[index[0]]
         node_to = truncated_index_g[index[1]]
-
+        index_in_g_node_from = data_loader.g_index[node_from]
+        index_in_g_node_to = data_loader.g_index[node_to]
+        
+        if distance_type == "spd":
+            distance = data_loader.np_spd[index_in_g_node_from][index_in_g_node_to]
+        else:
+            distance = data_loader.np_ed[index_in_g_node_from][index_in_g_node_to]
+        
         if nx.has_path(spanner, node_from, node_to):
-            shortest_path_distance = nx.dijkstra_path_length(spanner, node_from, node_to, weight="weight")
+            shortest_path_distance = nx.dijkstra_path_length(spanner, node_from, node_to, weight="length")
         else:
             shortest_path_distance = float("inf")
             
-        if shortest_path_distance >= delta * data_loader.np_ed[index[0]][index[1]]:
-            spanner.add_edge(node_from, node_to, weight=data_loader.np_ed[index[0]][index[1]])   
-            
-            
+        if shortest_path_distance >= delta * distance:
+            spanner.add_edge(node_from, node_to, length=distance)
+                  
     node_mapping = {node:"" for node in data_loader.G.nodes()}
     truncated_np_pr = data_loader.np_pr[node_indice,:]
     for node in data_loader.G.nodes(data=True):
@@ -269,8 +381,17 @@ def apply_spanner(data_loader, delta, n_nodes):
             node_mapping[node[0]] = nearest_node
             index_in_spanner = truncated_g_index[nearest_node]
             index_in_g = data_loader.g_index[node[0]]
-            truncated_np_pr[index_in_spanner,0] += data_loader.np_pr[index_in_g]
+            truncated_np_pr[index_in_spanner,0] += data_loader.np_pr[index_in_g,0]
         else:
             node_mapping[node[0]] = node[0]
+    
+    gm = GraphMaker()
+    spanner_spd = gm.compute_shortest_path_distance_dict(spanner)
+    spanner_np_spd = np.zeros((n_nodes, n_nodes))
+    for node1 in spanner.nodes():
+        index1 = truncated_g_index[node1]
+        for node2 in spanner.nodes():
+            index2 = truncated_g_index[node2]
+            spanner_np_spd[index1][index2] = spanner_spd[node1][node2]
 
-    return spanner, truncated_np_ed, truncated_np_pr, truncated_index_g, truncated_g_index, node_mapping
+    return spanner, spanner_np_spd, truncated_np_pr, truncated_index_g, truncated_g_index, node_mapping
