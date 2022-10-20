@@ -26,8 +26,6 @@ logger = getLogger("sub_module")
 with open('/GG-I/data/location_data.json', 'r') as f:
     location_data = json.load(f)
 
-
-# cutoff_value = 3000
 class GraphMaker():
     def __init__(self):
         pass
@@ -41,8 +39,7 @@ class GraphMaker():
         _shortest_path_distance_dict = {node:{} for node in graph.nodes}
         for node in graph.nodes:
             for node_ in graph.nodes:
-                # shortest_path_distance_dict[node][node_] = shortest_path_distance_dict[node][node_] if node_ in list(shortest_path_distance_dict[node].keys()) else 0
-                _shortest_path_distance_dict[node][node_] = shortest_path_distance_dict[node][node_] if node_ in list(shortest_path_distance_dict[node].keys()) else cutoff_value
+                _shortest_path_distance_dict[node][node_] = shortest_path_distance_dict[node][node_]
         return _shortest_path_distance_dict
 
     def make_uniform_prior_distribution(self, graph, sub_graph):
@@ -136,10 +133,10 @@ class TruncatedMapGraphMaker(MapGraphMaker):
         simplify = kwargs["simplify"]
         n_graph_nodes = kwargs["n_graph_nodes"]
         
-        self.original_data_name = f"{lat}_{lon}_{distance}_simplify{simplify}"
+        self.original_data_name = f"{location_name}_{distance}_simplify{simplify}"
         self.original_graph_data_dir = graph_dir / f"{self.original_data_name}.ml"
         
-        self.data_name = f"{lat}_{lon}_{distance}_simplify{simplify}_ngraphnodes{n_graph_nodes}"
+        self.data_name = f"{location_name}_{distance}_simplify{simplify}_ngraphnodes{n_graph_nodes}"
         self.register_dir(self.data_name, prior_type)
         
         if self.original_graph_data_dir.exists():
