@@ -128,9 +128,9 @@ class TruncatedMapGraphMaker(MapGraphMaker):
         location_name = kwargs["location"]
         lat = location_data[location_name]["lat"]
         lon = location_data[location_name]["lon"]
-        if location_name == "Tokyo":
+        if (location_name == "Tokyo") and (kwargs["distance"] == 0):
             distance = 3500
-        elif location_name == "Akita":
+        elif location_name == "Akita" and (kwargs["distance"] == 0):
             distance = 4500
         else:
             distance = kwargs["distance"]
