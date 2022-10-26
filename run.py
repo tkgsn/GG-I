@@ -7,7 +7,7 @@ from src.my_util import result_dir
 parser = argparse.ArgumentParser()
 parser.add_argument("--mechanism", default="GEM", type=str)
 parser.add_argument("--location", default="Akita", type=str)
-parser.add_argument("--distance", default=2000, type=int)
+parser.add_argument("--distance", default=4000, type=int)
 parser.add_argument("--n_optgeoi_nodes", default=100, type=int)
 parser.add_argument("--n_graph_nodes", default=0, type=int)
 parser.add_argument("--epsilon", default=0.001, type=float)
