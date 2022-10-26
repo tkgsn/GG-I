@@ -225,6 +225,9 @@ class OptimalGraphExponentialMechanism(GraphExponentialMechanism):
             dif_list = []
             n_rm_list = len(rm_list)
             n_targets = n_nodes - n_rm_list
+            if n_targets == 1:
+                logger.info("only 1 node remaining")
+                break
             counter = 0
             d = 0
             
@@ -314,6 +317,9 @@ class OptimalGraphExponentialMechanism(GraphExponentialMechanism):
 
         logger.info("start preprocess optimization")
         while True:
+            if len(rm_list) == n_nodes-1:
+                break
+            
             dif_list = []
             
             n_rm_list = len(rm_list)
@@ -343,7 +349,6 @@ class OptimalGraphExponentialMechanism(GraphExponentialMechanism):
                     
             if not dif_list:
                 break
-        logger.debug(rm_list)
                 
         return rm_list
     

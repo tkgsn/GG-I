@@ -27,6 +27,8 @@ strtmec = {"GEM": GraphExponentialMechanism,
           "PLMG": PlanarLaplaceMechanismOnGraph}
 
 if __name__ == "__main__":
+    
+    print(args)
 
     data_loader = DataLoader(args.location, **vars(args))
     mechanism = strtmec[args.mechanism](data_loader, **vars(args))
@@ -35,3 +37,4 @@ if __name__ == "__main__":
     save_dir.mkdir(parents=True, exist_ok=True)
     with open(save_dir / f"{mechanism}.json", "w") as f:
         json.dump(score(mechanism), f)
+    print(f"saved results to {save_dir / f'{mechanism}.json'}")
