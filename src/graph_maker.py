@@ -224,7 +224,7 @@ class TruncatedMapGraphMaker(MapGraphMaker):
         n_sub_graph_nodes = len(sub_graph)
         prior = {node:0 for node in all_nodes}
         for node in nodes:
-            prior[node] = 1/n_sub_graph_nodes
+            prior[node] = 1/n_chosen
         return prior
     
 
