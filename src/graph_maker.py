@@ -204,6 +204,29 @@ class TruncatedMapGraphMaker(MapGraphMaker):
         logger.info(f"saved spd to {self.spd_data_dir}")
         logger.info(f"saved ed to {self.ed_data_dir}")
         logger.info(f"saved prior to {self.prior_data_dir}")
+        
+        
+    def make_uniform_prior_distribution(self, graph, sub_graph):
+        
+        all_nodes = graph.nodes()
+        n_chosen = 50
+        nodes = []
+        if n_chosen == 0:
+            nodes = all_nodes
+        else:
+            random.seed(0)
+            nodes = []
+            while (len(nodes) < n_chosen) and (len(nodes) != len(all_nodes)):
+                choiced = random.choice(all_nodes)
+                if choiced not in nodes:
+                    nodes.append(choiced)
+                    
+        n_sub_graph_nodes = len(sub_graph)
+        prior = {node:0 for node in all_nodes}
+        for node in nodes:
+            prior[node] = 1/n_sub_graph_nodes
+        return prior
+    
 
 k = 0.001
 class KyotoMapGraphMaker(MapGraphMaker):
